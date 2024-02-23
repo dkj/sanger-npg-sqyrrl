@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -69,50 +70,68 @@ func setupSignalHandler(cancel context.CancelFunc) {
 // is not readable, an error is returned.
 func getIRODSAccount(envFilePath string) (*types.IRODSAccount, error) {
 	log := logs.GetLogger()
+	var account *types.IRODSAccount
 
 	// At this point envFilePath is known to be non-empty
 
-	mgr, err := icommands.CreateIcommandsEnvironmentManager()
-	if err != nil {
-		log.Err(err).Msg("failed to create an iRODS environment manager")
-		return nil, err
-	}
+	// let's use the go-irodsclient YAML if given a yaml file
+	if strings.HasSuffix(envFilePath, ".yaml") {
+		yaml, err := os.ReadFile(envFilePath)
+		if err != nil {
+			log.Err(err).Msg("failed to read iRODS yaml file")
+			return nil, err
+		}
 
-	// mgr.Load below will succeed even if the iRODS environment file does not exist,
-	// but we absolutely don't want that behaviour here.
-	fileInfo, err := os.Stat(envFilePath)
-	if os.IsNotExist(err) {
-		log.Err(err).Str("path", envFilePath).
-			Msg("iRODS environment file does not exist")
-		return nil, err
-	}
-	if fileInfo.IsDir() {
-		ferr := errors.New("iRODS environment file is a directory")
-		log.Err(ferr).Str("path", envFilePath).
-			Msg("iRODS environment file is a directory")
-		return nil, ferr
-	}
+		account, err = types.CreateIRODSAccountFromYAML(yaml)
+		if err != nil {
+			log.Err(err).Msg("failed to create an iRODS account from yaml")
+			return nil, err
+		}
 
-	if err := mgr.SetEnvironmentFilePath(envFilePath); err != nil {
-		log.Err(err).
-			Str("path", envFilePath).
-			Msg("failed to set the iRODS environment file path")
-		return nil, err
-	}
+	} else {
 
-	if err := mgr.Load(os.Getpid()); err != nil {
-		log.Err(err).
-			Msg("the iRODS environment manager failed to load an environment")
-		return nil, err
-	}
+		mgr, err := icommands.CreateIcommandsEnvironmentManager()
+		if err != nil {
+			log.Err(err).Msg("failed to create an iRODS environment manager")
+			return nil, err
+		}
 
-	log.Info().Str("path", mgr.GetEnvironmentFilePath()).
-		Msg("loaded iRODS environment file")
+		// mgr.Load below will succeed even if the iRODS environment file does not exist,
+		// but we absolutely don't want that behaviour here.
+		fileInfo, err := os.Stat(envFilePath)
+		if os.IsNotExist(err) {
+			log.Err(err).Str("path", envFilePath).
+				Msg("iRODS environment file does not exist")
+			return nil, err
+		}
+		if fileInfo.IsDir() {
+			ferr := errors.New("iRODS environment file is a directory")
+			log.Err(ferr).Str("path", envFilePath).
+				Msg("iRODS environment file is a directory")
+			return nil, ferr
+		}
 
-	account, err := mgr.ToIRODSAccount()
-	if err != nil {
-		log.Err(err).Msg("failed to obtain an iRODS account instance")
-		return nil, err
+		if err := mgr.SetEnvironmentFilePath(envFilePath); err != nil {
+			log.Err(err).
+				Str("path", envFilePath).
+				Msg("failed to set the iRODS environment file path")
+			return nil, err
+		}
+
+		if err := mgr.Load(os.Getpid()); err != nil {
+			log.Err(err).
+				Msg("the iRODS environment manager failed to load an environment")
+			return nil, err
+		}
+
+		log.Info().Str("path", mgr.GetEnvironmentFilePath()).
+			Msg("loaded iRODS environment file")
+
+		account, err = mgr.ToIRODSAccount()
+		if err != nil {
+			log.Err(err).Msg("failed to obtain an iRODS account instance")
+			return nil, err
+		}
 	}
 
 	log.Info().Str("host", account.Host).
