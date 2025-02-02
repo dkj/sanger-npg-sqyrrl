@@ -1,17 +1,10 @@
 {
-	"name": "ubuntu-dood-go-sqyrrl",
+	"name": "ubuntu-go-sqyrrl",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
 	//"image": "mcr.microsoft.com/devcontainers/base:jammy",
 	"dockerComposeFile": "docker-compose.devcontainer.yaml",
 	"service": "devcontainer",
 	"features": {
-		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
-			"moby": true,
-			"installDockerBuildx": true,
-			"installDockerComposeSwitch": true,
-			"version": "latest",
-			"dockerDashComposeVersion": "v2"
-		},
 		"ghcr.io/devcontainers/features/go:1": {
 			"version": "1.23"
 		}
