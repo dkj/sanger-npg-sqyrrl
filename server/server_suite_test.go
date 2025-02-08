@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -35,6 +36,8 @@ import (
 	ifs "github.com/cyverse/go-irodsclient/irods/fs"
 	"github.com/cyverse/go-irodsclient/irods/types"
 	"github.com/rs/zerolog"
+
+	"github.com/oauth2-proxy/mockoidc"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -65,6 +68,8 @@ var (
 	// This is to test cases where a user is a member of multiple groups
 	otherGroups  = []string{"group_1", "group_2", "group_3", "group_4", "group_5"}
 	userInOthers = "user_in_others"
+
+	mockoidcServer *mockoidc.MockOIDC
 
 	sqyrrlConfig server.Config
 	sessManager  *scs.SessionManager
@@ -224,16 +229,35 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 		Expect(inGroup).To(BeTrue())
 	}
 
-	// OIDC is not enabled for testing. We test for authenticated cases by creating
+	// Set up the mock OIDC server
+	mockoidcServer, err = mockoidc.Run()
+	Expect(err).NotTo(HaveOccurred())
+	// Ensure the OIDC server is ready
+	urloidc := mockoidcServer.Issuer() + "/.well-known/openid-configuration"
+	oidcclient := http.Client{}
+	getoidcpage := func() (bool, error) {
+		r, err := oidcclient.Get(urloidc)
+		if err != nil {
+			return false, err
+		}
+		return r.StatusCode == http.StatusOK, nil
+	}
+	Eventually(getoidcpage, "1s").Should(BeTrue())
+
+	// OIDC is now enabled for testing. But we still test for authenticated cases by creating
 	// a session manager and populating it with a session that simulates OIDC
 	// authentication.
 	sqyrrlConfig = server.Config{
-		Host:          "127.0.0.1",
-		Port:          "9999",
-		CertFilePath:  "./testdata/config/localhost.crt",
-		KeyFilePath:   "./testdata/config/localhost.key",
-		IndexInterval: time.Hour * 1,
-		EnableOIDC:    false,
+		Host:             "localhost",
+		Port:             "9999",
+		CertFilePath:     "./testdata/config/localhost.crt",
+		KeyFilePath:      "./testdata/config/localhost.key",
+		IndexInterval:    time.Hour * 1,
+		OIDCIssuerURL:    mockoidcServer.Issuer(),
+		OIDCClientID:     mockoidcServer.ClientID,
+		OIDCClientSecret: mockoidcServer.ClientSecret,
+		OIDCRedirectURL:  "https://localhost:9999" + server.EndpointAuthCallback,
+		EnableOIDC:       true,
 	}
 	sessManager = scs.New()
 
@@ -243,9 +267,9 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 	sqyrrlServer, err = server.NewSqyrrlServer(suiteLogger, &sqyrrlConfig, sessManager)
 	Expect(err).NotTo(HaveOccurred())
 
-	// server could be started here if testing with network connections e.g.
-	// err = sqyrrlServer.StartBackground()
-	// Expect(err).NotTo(HaveOccurred())
+	// server started here for testing with network connections (rather than handlers directly)
+	err = sqyrrlServer.StartBackground()
+	Expect(err).NotTo(HaveOccurred())
 }, NodeTimeout(time.Second*20))
 
 // Release the iRODS filesystem
@@ -258,6 +282,9 @@ var _ = AfterSuite(func() {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		Expect(err).NotTo(HaveOccurred())
 	}
+
+	// Shut down the mock OIDC server
+	mockoidcServer.Shutdown()
 })
 
 // Return a new pseudo-randomised path in iRODS
