@@ -357,7 +357,7 @@ var _ = Describe("Authentication Handler", func() {
 					Email: "someuser@somewhere.com",
 				})
 			})
-
+			var wo *http.Response
 			It("should return a 302 redirect to the Sqyrrl auth callback", func(ctx SpecContext) {
 				httpclient := http.Client{
 					CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -365,12 +365,29 @@ var _ = Describe("Authentication Handler", func() {
 						return http.ErrUseLastResponse
 					},
 				}
-				wo, err := httpclient.Get(ws.Header().Get("Location"))
+				wo, err = httpclient.Get(ws.Header().Get("Location"))
 				Expect(err).NotTo(HaveOccurred())
 				Expect(wo.StatusCode).To(Equal(http.StatusFound))
 				Expect(wo.Header.Get("Location")).To(ContainSubstring(server.EndpointAuthCallback))
 			})
-			// Can continue here with Sqyrrl's auth callbacl handler
+			// Can continue here with Sqyrrl's auth callback handler
+			When("calling the Sqyrrl auth callback", func() {
+				BeforeEach(func(ctx SpecContext) {
+					handler, err = sqyrrlServer.GetHandler(server.EndpointAuthCallback)
+					Expect(err).NotTo(HaveOccurred())
+
+					r, err = http.NewRequest("GET", wo.Header.Get("Location"), nil)
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				It("should return a 302 redirect to the home page", func(ctx SpecContext) {
+					wscb := httptest.NewRecorder()
+					handler.ServeHTTP(wscb, r)
+
+					Expect(wscb.Code).To(Equal(http.StatusFound))
+					Expect(wscb.Header().Get("Location")).To(Equal(server.EndpointRoot))
+				})
+			})
 		})
 	})
 
