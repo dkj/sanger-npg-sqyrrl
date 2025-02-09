@@ -248,7 +248,7 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 	// a session manager and populating it with a session that simulates OIDC
 	// authentication.
 	sqyrrlConfig = server.Config{
-		Host:             "127.0.0.1",
+		Host:             "localhost",
 		Port:             "9999",
 		CertFilePath:     "./testdata/config/localhost.crt",
 		KeyFilePath:      "./testdata/config/localhost.key",
@@ -256,7 +256,7 @@ var _ = BeforeSuite(func(ctx SpecContext) {
 		OIDCIssuerURL:    mockoidcServer.Issuer(),
 		OIDCClientID:     mockoidcServer.ClientID,
 		OIDCClientSecret: mockoidcServer.ClientSecret,
-		OIDCRedirectURL:  "http://localhost:9999" + server.EndpointAuthCallback,
+		OIDCRedirectURL:  "https://localhost:9999" + server.EndpointAuthCallback,
 		EnableOIDC:       true,
 	}
 	sessManager = scs.New()

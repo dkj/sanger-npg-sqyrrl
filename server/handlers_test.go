@@ -19,7 +19,11 @@ package server_test
 
 import (
 	"context"
+	"crypto/tls"
+	"io"
+	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"path"
@@ -329,27 +333,27 @@ var _ = Describe("iRODS Get Handler", func() {
 
 var _ = Describe("Authentication Handler", func() {
 	When("Logging in to Sqyrrl", func() {
-		var r *http.Request
-		var handler http.Handler
 		var err error
-		var ws *httptest.ResponseRecorder
-
-		BeforeEach(func(ctx SpecContext) {
-			handler, err = sqyrrlServer.GetHandler(server.EndpointLogin)
-			Expect(err).NotTo(HaveOccurred())
-
-			postURL := server.EndpointLogin
-			r, err = http.NewRequest("POST", postURL, nil)
-			Expect(err).NotTo(HaveOccurred())
-		}, NodeTimeout(time.Second*2))
-
+		jar, err := cookiejar.New(nil)
+		Expect(err).NotTo(HaveOccurred())
+		insecureTransport := http.DefaultTransport.(*http.Transport).Clone()
+		insecureTransport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+		httpclient := &http.Client{
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				// special case to stop the redirect chain
+				return http.ErrUseLastResponse
+			},
+			Transport: insecureTransport,
+			Jar:       jar,
+		}
+		var ws *http.Response
 		It("should return a 302 redirect to OIDC server", func(ctx SpecContext) {
-			ws = httptest.NewRecorder()
-			handler.ServeHTTP(ws, r)
-
-			Expect(ws.Code).To(Equal(http.StatusFound))
-			Expect(ws.Header().Get("Location")).To(ContainSubstring(mockoidcServer.AuthorizationEndpoint()))
-		})
+			url := url.URL{Scheme: "https", Host: net.JoinHostPort(sqyrrlConfig.Host, sqyrrlConfig.Port), Path: server.EndpointLogin}
+			ws, err = httpclient.Post(url.String(), "application/x-www-form-urlencoded", nil)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(ws.StatusCode).To(Equal(http.StatusFound))
+			Expect(ws.Header.Get("Location")).To(ContainSubstring(mockoidcServer.AuthorizationEndpoint()))
+		}, NodeTimeout(time.Second*20))
 
 		When("contacting the OIDC server", func() {
 			BeforeEach(func(ctx SpecContext) {
@@ -357,35 +361,34 @@ var _ = Describe("Authentication Handler", func() {
 					Email: "someuser@somewhere.com",
 				})
 			})
+
 			var wo *http.Response
 			It("should return a 302 redirect to the Sqyrrl auth callback", func(ctx SpecContext) {
-				httpclient := http.Client{
-					CheckRedirect: func(req *http.Request, via []*http.Request) error {
-						// special case to stop the redirect chain
-						return http.ErrUseLastResponse
-					},
-				}
-				wo, err = httpclient.Get(ws.Header().Get("Location"))
+				wo, err = httpclient.Get(ws.Header.Get("Location"))
 				Expect(err).NotTo(HaveOccurred())
 				Expect(wo.StatusCode).To(Equal(http.StatusFound))
 				Expect(wo.Header.Get("Location")).To(ContainSubstring(server.EndpointAuthCallback))
-			})
-			// Can continue here with Sqyrrl's auth callback handler
+			}, NodeTimeout(time.Second*20))
 			When("calling the Sqyrrl auth callback", func() {
-				BeforeEach(func(ctx SpecContext) {
-					handler, err = sqyrrlServer.GetHandler(server.EndpointAuthCallback)
-					Expect(err).NotTo(HaveOccurred())
-
-					r, err = http.NewRequest("GET", wo.Header.Get("Location"), nil)
-					Expect(err).NotTo(HaveOccurred())
-				})
-
+				var wscb *http.Response
 				It("should return a 302 redirect to the home page", func(ctx SpecContext) {
-					wscb := httptest.NewRecorder()
-					handler.ServeHTTP(wscb, r)
+					wscb, err = httpclient.Get(wo.Header.Get("Location"))
+					Expect(err).NotTo(HaveOccurred())
+					Expect(wscb.StatusCode).To(Equal(http.StatusFound))
+					Expect(wscb.Header.Get("Location")).To(Equal(server.EndpointRoot)) // can do exact check as redirect is relative
+				}, NodeTimeout(time.Second*20))
 
-					Expect(wscb.Code).To(Equal(http.StatusFound))
-					Expect(wscb.Header().Get("Location")).To(Equal(server.EndpointRoot))
+				When("following the redirect to the home page", func() {
+					It("should return a 200 OK and show the user's email", func(ctx SpecContext) {
+						url := url.URL{Scheme: "https", Host: net.JoinHostPort(sqyrrlConfig.Host, sqyrrlConfig.Port), Path: wscb.Header.Get("Location")}
+						// need to form url from relative path
+						wsh, err := httpclient.Get(url.String())
+						Expect(err).NotTo(HaveOccurred())
+						Expect(wsh.StatusCode).To(Equal(http.StatusOK))
+						bodyBytes, err := io.ReadAll(wsh.Body)
+						Expect(err).NotTo(HaveOccurred())
+						Expect(string(bodyBytes)).To(ContainSubstring("someuser@somewhere.com"))
+					}, NodeTimeout(time.Second*20))
 				})
 			})
 		})
