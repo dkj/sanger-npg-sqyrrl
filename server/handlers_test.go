@@ -188,9 +188,11 @@ var _ = Describe("iRODS Get Handler", func() {
 					var c context.Context
 					// There is no session for this token, so a new session will always be created
 					c, err = sessManager.Load(r.Context(), sessionToken)
+
+					user := server.ParseUser(userNotInPublic)
 					sessManager.Put(c, server.SessionKeyAccessToken, accessToken)
-					sessManager.Put(c, server.SessionKeyUserName, userNotInPublic)
-					sessManager.Put(c, server.SessionKeyUserEmail, userNotInPublic+"@sanger.ac.uk")
+					sessManager.Put(c, server.SessionKeyUserName, user.Name)
+					sessManager.Put(c, server.SessionKeyUserEmail, user.Name+"@sanger.ac.uk")
 					r = r.WithContext(c)
 
 					// A real session token is created here, but we don't need it
@@ -216,8 +218,9 @@ var _ = Describe("iRODS Get Handler", func() {
 							conn, err = irodsFS.GetIOConnection()
 							Expect(err).NotTo(HaveOccurred())
 
+							group := server.ParseUser(populatedGroup)
 							err = ifs.ChangeDataObjectAccess(conn, remotePath, types.IRODSAccessLevelReadObject,
-								populatedGroup, testZone, false)
+								group.Name, group.Zone, false)
 							Expect(err).NotTo(HaveOccurred())
 						}, NodeTimeout(time.Second*5))
 
@@ -255,7 +258,7 @@ var _ = Describe("iRODS Get Handler", func() {
 						Expect(err).NotTo(HaveOccurred())
 					})
 
-					It("should return Ok", func(ctx SpecContext) {
+					It("should return OK", func(ctx SpecContext) {
 						rec := httptest.NewRecorder()
 						handler.ServeHTTP(rec, r)
 
@@ -271,9 +274,11 @@ var _ = Describe("iRODS Get Handler", func() {
 					var c context.Context
 					// There is no session for this token, so a new session will always be created
 					c, err = sessManager.Load(r.Context(), sessionToken)
+
+					user := server.ParseUser(userInPublic)
 					sessManager.Put(c, server.SessionKeyAccessToken, accessToken)
-					sessManager.Put(c, server.SessionKeyUserName, userInPublic)
-					sessManager.Put(c, server.SessionKeyUserEmail, userInPublic+"@sanger.ac.uk")
+					sessManager.Put(c, server.SessionKeyUserName, user.Name)
+					sessManager.Put(c, server.SessionKeyUserEmail, user.Name+"@sanger.ac.uk")
 					r = r.WithContext(c)
 
 					// A real session token is created here, but we don't need it
@@ -475,7 +480,7 @@ var _ = Describe("Seamless Auth Flow", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			err = ifs.ChangeDataObjectAccess(conn, remotePath, types.IRODSAccessLevelReadObject,
-				populatedGroup, testZone, false)
+				server.ParseUser(populatedGroup).Name, testZone, false)
 			Expect(err).NotTo(HaveOccurred())
 		}, NodeTimeout(time.Second*5))
 
@@ -504,7 +509,7 @@ var _ = Describe("Seamless Auth Flow", func() {
 		When("authenticated with user who has access", func() {
 			BeforeEach(func(ctx SpecContext) {
 				mockoidcServer.UserQueue.Push(&mockoidc.MockUser{
-					Email: userNotInPublic + "@whereever.com",
+					Email: server.ParseUser(userNotInPublic).Name + "@whereever.com",
 				})
 			})
 			AfterEach(func(ctx SpecContext) {
@@ -534,7 +539,7 @@ var _ = Describe("Seamless Auth Flow", func() {
 		When("authenticated with user who does not have access", func() {
 			BeforeEach(func(ctx SpecContext) {
 				mockoidcServer.UserQueue.Push(&mockoidc.MockUser{
-					Email: userInOthers + "@whereever.com",
+					Email: server.ParseUser(userInOthers).Name + "@whereever.com",
 				})
 			})
 			AfterEach(func(ctx SpecContext) {
